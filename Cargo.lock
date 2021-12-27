@@ -358,6 +358,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "color-eyre",
+ "glob",
  "safe_network",
  "tokio",
  "xor_name",

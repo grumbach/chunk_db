@@ -1,12 +1,13 @@
-pub use xor_name::XorName;
 pub use safe_network::types::{Chunk, ChunkAddress};
+pub use xor_name::{Prefix, XorName};
 
-use std::path::Path;
 use bytes::Bytes;
+use glob::{glob, GlobError};
+use std::path::Path;
 
 use tokio::fs::File;
-use tokio::io::AsyncWriteExt; // for write_all()
-use tokio::io::AsyncReadExt; // for read_to_end()
+use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt; // for write_all() // for read_to_end()
 
 //tmp anyhow
 use color_eyre::eyre::Result;
@@ -20,7 +21,8 @@ fn address_to_filepath(addr: &ChunkAddress) -> String {
     let bin = format!("{:b}", xorname);
     let hex = format!("{:x}", xorname);
     let filename = format!("{}{}", hex, CHUNK_EXT);
-    let dir_path:String = bin.chars()
+    let dir_path: String = bin
+        .chars()
         .take(BIT_TREE_DEPTH)
         .map(|c| format!("{}/", c))
         .collect();
@@ -31,11 +33,10 @@ fn address_to_filepath(addr: &ChunkAddress) -> String {
 
 pub async fn write_chunk(data: &Chunk) -> Result<()> {
     let addr = data.address();
-    let path_str = address_to_filepath(&addr);
+    let path_str = address_to_filepath(addr);
     let filepath = Path::new(&path_str);
-    match filepath.parent() {
-        Some(dirs) => {tokio::fs::create_dir_all(dirs).await?;},
-        None => {},
+    if let Some(dirs) = filepath.parent() {
+        tokio::fs::create_dir_all(dirs).await?;
     }
 
     let mut file = File::create(filepath).await?;
@@ -44,7 +45,7 @@ pub async fn write_chunk(data: &Chunk) -> Result<()> {
 }
 
 pub async fn read_chunk(addr: &ChunkAddress) -> Result<Chunk> {
-    let path_str = address_to_filepath(&addr);
+    let path_str = address_to_filepath(addr);
     let filepath = Path::new(&path_str);
 
     let mut f = File::open(filepath).await?;
@@ -56,21 +57,71 @@ pub async fn read_chunk(addr: &ChunkAddress) -> Result<Chunk> {
     Ok(chunk)
 }
 
+pub fn list_all_files() -> Result<Vec<String>> {
+    let chunks_path = format!("{}/**/*{}", CHUNK_STORE_PATH, CHUNK_EXT);
+    let path = Path::new(&chunks_path);
+    let files = glob(&path.display().to_string())?
+        .map(|res| res.map(|filepath| filepath.display().to_string()))
+        .collect::<Result<Vec<String>, GlobError>>()?;
+    Ok(files)
+}
+
+pub fn list_files_without_prefix(prefix: Prefix) -> Result<Vec<String>> {
+    let all_files = list_all_files()?;
+
+    // get path for matching prefix
+    let bit_count = prefix.bit_count();
+    let xorname = prefix.name();
+    let bin = format!("{:b}", xorname);
+    let prefix_dir_path: String = bin
+        .chars()
+        .take(bit_count)
+        .map(|c| format!("{}/", c))
+        .collect();
+    let prefix_files_path = format!("{}/{}", CHUNK_STORE_PATH, prefix_dir_path);
+    // let path = Path::new(&prefix_files_path);
+    // TODO check safety with Windows paths
+
+    // get files outside that path
+    let outside_prefix = all_files
+        .into_iter()
+        .filter(|p| !p.starts_with(&prefix_files_path))
+        .collect();
+    Ok(outside_prefix)
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     color_eyre::install()?;
 
+    // test basic write/read
     let chunk = Chunk::new(Bytes::from("hello world!"));
     let addr = &chunk.address();
-
     write_chunk(&chunk).await?;
 
     let path = address_to_filepath(addr);
     println!("{}\n", path);
 
     let read_chunk = read_chunk(addr).await?;
-
     println!("GOT: {:?}\n", read_chunk.value());
+    assert_eq!(chunk.value(), read_chunk.value());
+
+    // write more chunks
+    let chunk1 = Chunk::new(Bytes::from("hello world!1"));
+    let chunk2 = Chunk::new(Bytes::from("hello world!2"));
+    let chunk3 = Chunk::new(Bytes::from("hello world!3"));
+
+    write_chunk(&chunk1).await?;
+    write_chunk(&chunk2).await?;
+    write_chunk(&chunk3).await?;
+
+    // test prune
+    let files = list_all_files()?;
+    println!("ALL FILES: {:#?}", files);
+    let prefix = Prefix::new(4, *addr.name());
+    println!("PREFIX: {:?}", prefix);
+    let prune_files = list_files_without_prefix(prefix)?;
+    println!("PRUNE FILES: {:#?}", prune_files);
 
     Ok(())
 }

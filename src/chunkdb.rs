@@ -86,3 +86,89 @@ pub fn list_files_without_prefix(prefix: Prefix) -> Result<Vec<String>> {
         .collect();
     Ok(outside_prefix)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_write_read_chunk() {
+        let chunk = Chunk::new(Bytes::from("test"));
+        let addr = &chunk.address();
+
+        write_chunk(&chunk).await.expect("Failed to write chunk.");
+        let read_chunk = read_chunk(addr).await.expect("Failed to read chunk.");
+
+        assert_eq!(chunk.value(), read_chunk.value());
+    }
+
+    #[tokio::test]
+    async fn test_write_read_async_multiple_chunks() {
+        let chunk1 = Chunk::new(Bytes::from("test1"));
+        let chunk2 = Chunk::new(Bytes::from("test2"));
+        let chunk3 = Chunk::new(Bytes::from("test3"));
+        let chunk4 = Chunk::new(Bytes::from("test4"));
+        let addr1 = &chunk1.address();
+        let addr2 = &chunk2.address();
+        let addr3 = &chunk3.address();
+        let addr4 = &chunk4.address();
+
+        let (res1, res2, res3, res4) = tokio::join!(
+            write_chunk(&chunk1),
+            write_chunk(&chunk2),
+            write_chunk(&chunk3),
+            write_chunk(&chunk4),
+        );
+        res1.expect("error writing chunk1");
+        res2.expect("error writing chunk2");
+        res3.expect("error writing chunk3");
+        res4.expect("error writing chunk4");
+
+        let (read_chunk1, read_chunk2, read_chunk3, read_chunk4) = tokio::join!(
+            read_chunk(addr1),
+            read_chunk(addr2),
+            read_chunk(addr3),
+            read_chunk(addr4),
+        );
+
+        assert_eq!(chunk1.value(), read_chunk1.expect("error reading chunk 1").value());
+        assert_eq!(chunk2.value(), read_chunk2.expect("error reading chunk 2").value());
+        assert_eq!(chunk3.value(), read_chunk3.expect("error reading chunk 3").value());
+        assert_eq!(chunk4.value(), read_chunk4.expect("error reading chunk 4").value());
+    }
+
+    #[tokio::test]
+    async fn test_write_read_async_multiple_identical_chunks() {
+        let chunk1 = Chunk::new(Bytes::from("test_concurrent"));
+        let chunk2 = Chunk::new(Bytes::from("test_concurrent"));
+        let chunk3 = Chunk::new(Bytes::from("test_concurrent"));
+        let chunk4 = Chunk::new(Bytes::from("test_concurrent"));
+        let addr1 = &chunk1.address();
+        let addr2 = &chunk2.address();
+        let addr3 = &chunk3.address();
+        let addr4 = &chunk4.address();
+
+        let (res1, res2, res3, res4) = tokio::join!(
+            write_chunk(&chunk1),
+            write_chunk(&chunk2),
+            write_chunk(&chunk3),
+            write_chunk(&chunk4),
+        );
+        res1.expect("error writing chunk1");
+        res2.expect("error writing chunk2");
+        res3.expect("error writing chunk3");
+        res4.expect("error writing chunk4");
+
+        let (read_chunk1, read_chunk2, read_chunk3, read_chunk4) = tokio::join!(
+            read_chunk(addr1),
+            read_chunk(addr2),
+            read_chunk(addr3),
+            read_chunk(addr4),
+        );
+
+        assert_eq!(chunk1.value(), read_chunk1.expect("error reading chunk 1").value());
+        assert_eq!(chunk2.value(), read_chunk2.expect("error reading chunk 2").value());
+        assert_eq!(chunk3.value(), read_chunk3.expect("error reading chunk 3").value());
+        assert_eq!(chunk4.value(), read_chunk4.expect("error reading chunk 4").value());
+    }
+}
